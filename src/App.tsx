@@ -72,7 +72,6 @@ export default function App() {
   const [billboards, setBillboards] = useState<Billboard[]>([]);
   const [showOnlyInRadius, setShowOnlyInRadius] = useState<boolean>(false);
   const [originalExcelData, setOriginalExcelData] = useState<any[][]>([]);
-  const [originalWorkbook, setOriginalWorkbook] = useState<any>(null);
 
   // TAB NAVIGATION
   const [activeTab, setActiveTab] = useState<"proximitati" | "panouri" | "disponibilitati">("proximitati");
@@ -91,6 +90,28 @@ export default function App() {
   const poiInfoRef = useRef<google.maps.InfoWindow | null>(null);
   const [poiKeepExisting, setPoiKeepExisting] = useState<boolean>(true);
   const [poiColor, setPoiColor] = useState<string>("#ef4444"); // roșu implicit pentru prima căutare
+
+  // Refs pentru a accesa valorile curente în event listeners
+  const circleRef = useRef<google.maps.Circle | null>(null);
+  const centerMarkerRef = useRef<google.maps.Marker | null>(null);
+  const centerPointRef = useRef<CenterPoint>(null);
+  const centerModeRef = useRef<"store" | "billboard">("store");
+
+  useEffect(() => {
+    circleRef.current = circle;
+  }, [circle]);
+
+  useEffect(() => {
+    centerMarkerRef.current = centerMarker;
+  }, [centerMarker]);
+
+  useEffect(() => {
+    centerPointRef.current = centerPoint;
+  }, [centerPoint]);
+
+  useEffect(() => {
+    centerModeRef.current = centerMode;
+  }, [centerMode]);
 
   // STATUS
   const [status, setStatus] = useState<string>("");
@@ -330,7 +351,7 @@ export default function App() {
                 background:${btnPrimaryBg};color:${btnPrimaryFg};
                 border:1px solid ${btnPrimaryBg};cursor:pointer;
               ">
-              Setează ca centru
+              ${centerPoint && centerMode === "billboard" && Math.abs(centerPoint.location.lat - b.lat) < 0.0001 && Math.abs(centerPoint.location.lng - b.lng) < 0.0001 ? "Ascunde radius" : "Setează ca centru"}
             </button>
           </div>
         </div>
@@ -356,26 +377,79 @@ export default function App() {
   
         document.getElementById(`bb-setcenter-${b.id}`)?.addEventListener("click", () => {
           if (!googleNS || !map) return;
-          const loc = { lat: b.lat, lng: b.lng };
-          centerMarker?.setMap(null);
-          const cm = new googleNS.maps.Marker({
-            position: loc,
-            map,
-            title: b.name,
-            icon: {
-              path: googleNS.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: "#0ea5e9",
-              fillOpacity: 1,
-              strokeColor: "white",
-              strokeWeight: 2,
-            },
-          });
-          setCenterMarker(cm);
-          setCenterPoint({ name: b.name, location: loc });
-          setCenterMode("billboard");
-          map.panTo(loc);
-          map.setZoom(15);
+          
+          console.log("Button clicked for billboard:", b.name);
+          console.log("Current centerPoint (ref):", centerPointRef.current);
+          console.log("Current centerMode (ref):", centerModeRef.current);
+          console.log("Billboard coords:", b.lat, b.lng);
+          
+          // Verifică dacă acest panou este deja centrul folosind refs
+          const currentCenterPoint = centerPointRef.current;
+          const currentCenterMode = centerModeRef.current;
+          const isCurrentCenter = currentCenterPoint && 
+            currentCenterMode === "billboard" && 
+            Math.abs(currentCenterPoint.location.lat - b.lat) < 0.0001 && 
+            Math.abs(currentCenterPoint.location.lng - b.lng) < 0.0001;
+          
+          console.log("Is current center:", isCurrentCenter);
+          
+          if (isCurrentCenter) {
+            console.log("Resetting center and hiding radius");
+            // Dacă este centrul curent, resetează centrul și ascunde radiusul folosind refs
+            circleRef.current?.setMap(null);
+            setCircle(null);
+            centerMarkerRef.current?.setMap(null);
+            setCenterMarker(null);
+            setCenterPoint(null);
+            setCenterMode("store");
+            
+            console.log("Reset completed");
+            
+            // Actualizează textul butonului
+            const button = document.getElementById(`bb-setcenter-${b.id}`);
+            if (button) {
+              button.textContent = "Setează ca centru";
+              button.style.background = btnPrimaryBg;
+              button.style.color = btnPrimaryFg;
+              button.style.borderColor = btnPrimaryBg;
+              console.log("Button text updated to: Setează ca centru");
+            }
+          } else {
+            console.log("Setting as center");
+            // Dacă nu este centrul, setează-l ca centru
+            const loc = { lat: b.lat, lng: b.lng };
+            centerMarkerRef.current?.setMap(null);
+            const cm = new googleNS.maps.Marker({
+              position: loc,
+              map,
+              title: b.name,
+              icon: {
+                path: googleNS.maps.SymbolPath.CIRCLE,
+                scale: 8,
+                fillColor: "#0ea5e9",
+                fillOpacity: 1,
+                strokeColor: "white",
+                strokeWeight: 2,
+              },
+            });
+            setCenterMarker(cm);
+            setCenterPoint({ name: b.name, location: loc });
+            setCenterMode("billboard");
+            map.panTo(loc);
+            map.setZoom(15);
+            
+            console.log("Center set completed");
+            
+            // Actualizează textul butonului
+            const button = document.getElementById(`bb-setcenter-${b.id}`);
+            if (button) {
+              button.textContent = "Ascunde radius";
+              button.style.background = "#ef4444";
+              button.style.color = "#ffffff";
+              button.style.borderColor = "#ef4444";
+              console.log("Button text updated to: Ascunde radius");
+            }
+          }
         });
       });
     });
@@ -383,7 +457,7 @@ export default function App() {
     return { ...b, marker: m } as Billboard;
   };
 
-  // Funcție pentru extragerea hyperlink-urilor din Excel și salvarea lor separat
+  // Funcție pentru extragerea hyperlink-urilor din Excel
   const extractHyperlinksFromExcel = (ws: any, headerRow: number, dataRows: any[]) => {
     const hyperlinkColumns = ['Imagini 1', 'Imagini 2', 'Imagini 3', 'Schita', 'StreetView'];
     const hyperlinkData: Record<string, string[]> = {};
@@ -408,38 +482,18 @@ export default function App() {
           let hyperlinkUrl = '';
           
           if (cell) {
-            console.log(`Celula ${cellRef} pentru ${colName}:`, cell);
-            
             // Încercă diferite moduri de a accesa hyperlink-ul
             if (cell.l && cell.l.Target) {
               hyperlinkUrl = cell.l.Target;
-              console.log(`Găsit hyperlink în cell.l.Target: ${hyperlinkUrl}`);
             } else if (cell.h && cell.h.link) {
               hyperlinkUrl = cell.h.link;
-              console.log(`Găsit hyperlink în cell.h.link: ${hyperlinkUrl}`);
             } else if (cell.f && cell.f.includes('HYPERLINK')) {
               const match = cell.f.match(/HYPERLINK\("([^"]+)"/);
               if (match) {
                 hyperlinkUrl = match[1];
-                console.log(`Găsit hyperlink în formula: ${hyperlinkUrl}`);
               }
             } else if (cell.v && typeof cell.v === 'string' && cell.v.includes('http')) {
               hyperlinkUrl = cell.v;
-              console.log(`Găsit hyperlink în valoare: ${hyperlinkUrl}`);
-            } else if (cell.w && typeof cell.w === 'string' && cell.w.includes('http')) {
-              hyperlinkUrl = cell.w;
-              console.log(`Găsit hyperlink în cell.w: ${hyperlinkUrl}`);
-            }
-            
-            // Dacă nu am găsit URL direct, încerc să găsesc în proprietățile celulei
-            if (!hyperlinkUrl && cell) {
-              // Verifică toate proprietățile celulei pentru URL-uri
-              Object.keys(cell).forEach(key => {
-                if (typeof cell[key] === 'string' && cell[key].includes('http')) {
-                  hyperlinkUrl = cell[key];
-                  console.log(`Găsit hyperlink în proprietatea ${key}: ${hyperlinkUrl}`);
-                }
-              });
             }
           }
           
@@ -450,7 +504,6 @@ export default function App() {
       });
     });
     
-    console.log("Hyperlink-uri extrase:", hyperlinkData);
     return hyperlinkData;
   };
 
@@ -528,10 +581,6 @@ export default function App() {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      
-      // Salvăm workbook-ul original pentru a păstra hyperlink-urile și formatarea
-      setOriginalWorkbook(wb);
-      console.log("Workbook original salvat pentru a păstra formatarea și hyperlink-urile");
       
       // Detectează rândul de antet (căutăm "Latitudine"/"Longitudine" sau "Locatie")
       const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as any[][];
@@ -658,36 +707,16 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Export simplificat - modifică doar coloana Proximitati din Excel-ul original
+  // Export cu hyperlink-uri păstrate
   const exportRowsToXLSXWithHyperlinks = (rows: any[][], filename: string) => {
-    // Pentru a păstra hyperlink-urile și formatarea, folosim workbook-ul original
-    // Trebuie să salvăm workbook-ul original când încărcăm fișierul
+    // Folosim datele originale cu hyperlink-urile păstrate
+    const ws = XLSX.utils.aoa_to_sheet(originalExcelData);
     
-    if (!originalWorkbook) {
-      console.log("Nu există workbook original salvat!");
-      // Fallback la metoda veche
-      const ws = XLSX.utils.aoa_to_sheet(originalExcelData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "data");
-      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-      const blob = new Blob([wbout], { type: "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      return;
-    }
+    // Log pentru debugging
+    console.log("Datele originale pentru export:", originalExcelData);
     
-    // Folosim workbook-ul original și modificăm doar celulele necesare
-    const ws = originalWorkbook.Sheets[originalWorkbook.SheetNames[0]];
-    
-    console.log("Folosesc workbook-ul original pentru a păstra formatarea și hyperlink-urile");
-    
-    // Găsim indexul coloanei "Proximitati"
+    // Găsim coloanele cu hyperlink-uri în datele originale
+    const hyperlinkColumns = ['Imagini 1', 'Imagini 2', 'Imagini 3', 'Schita', 'StreetView'];
     const normalizeKey = (k: any) =>
       String(k || "")
         .toLowerCase()
@@ -698,78 +727,63 @@ export default function App() {
         .replace(/ț/g, "t")
         .replace(/î/g, "i");
     
-    const proximitatiIndex = originalExcelData[0]?.findIndex((header: string) => 
-      normalizeKey(header).includes("proximitati")
-    );
-    
-    if (proximitatiIndex === -1) {
-      console.log("Nu s-a găsit coloana 'Proximitati' în Excel-ul original!");
-      console.log("Header-urile disponibile:", originalExcelData[0]);
-    } else {
-      console.log(`Coloana Proximitati găsită la indexul: ${proximitatiIndex}`);
-      
-      // Pentru fiecare panou, actualizăm coloana Proximitati cu POI-urile din jurul lui
-      console.log(`Total panouri: ${billboards.length}`);
-      console.log(`POI markers disponibile: ${poiMarkers.length}`);
-      console.log(`Radius curent: ${radius} metri`);
-      
-      if (billboards.length === 0) {
-        console.log("Nu există panouri pentru a actualiza proximitățile!");
-        return;
-      }
-      
-      if (poiMarkers.length === 0) {
-        console.log("Nu există POI-uri pentru a calcula proximitățile!");
-        return;
-      }
-      
-      billboards.forEach((billboard, index) => {
-        console.log(`Procesez panou ${index + 1}/${billboards.length}: ${billboard.name}`);
-        
-        // Găsim rândul din Excel-ul original care corespunde acestui panou
-        const excelRowIndex = originalExcelData.findIndex((row, index) => {
-          if (index === 0) return false; // skip header
-          const lat = parseFloat(row[17]); // Latitudine
-          const lng = parseFloat(row[18]); // Longitudine
-          return Math.abs(lat - billboard.lat) < 0.0001 && Math.abs(lng - billboard.lng) < 0.0001;
+    // Găsim indexurile coloanelor cu hyperlink-uri în datele originale
+    const hyperlinkIndices: Record<string, number> = {};
+    if (originalExcelData.length > 0) {
+      originalExcelData[0].forEach((header, index) => {
+        const normHeader = normalizeKey(header);
+        hyperlinkColumns.forEach(colName => {
+          const normColName = normalizeKey(colName);
+          if (normHeader.includes(normColName)) {
+            hyperlinkIndices[colName] = index;
+          }
         });
-
-        console.log(`Rând Excel găsit pentru ${billboard.name}: ${excelRowIndex}`);
-
-        if (excelRowIndex !== -1) {
-          // Calculează proximitățile pentru acest panou
-          const center = new googleNS!.maps.LatLng(billboard.lat, billboard.lng);
-          const prox: string[] = [];
-          poiMarkers.forEach((m) => {
-            const p = m.getPosition();
-            if (!p) return;
-            const d = googleNS!.maps.geometry.spherical.computeDistanceBetween(p, center);
-            if (d <= radius) {
-              const name = m.getTitle() || "Loc";
-              const address = (m as any).addr || "";
-              prox.push(`${name} - ${address}`);
-            }
-          });
-          const proxStr = prox.join(" ; ");
-          
-          console.log(`Proximități calculate pentru ${billboard.name}: ${proxStr}`);
-          
-          // Actualizează doar coloana Proximitati în Excel
-          const proximitatiCellRef = XLSX.utils.encode_cell({ r: excelRowIndex, c: proximitatiIndex });
-          ws[proximitatiCellRef] = {
-            v: proxStr,
-            t: 's' // string type
-          };
-          
-          console.log(`Actualizat celula ${proximitatiCellRef} cu: ${proxStr}`);
-        } else {
-          console.log(`Nu s-a găsit rândul Excel pentru panou: ${billboard.name}`);
-        }
       });
     }
     
-    // Exportăm workbook-ul modificat
-    const wbout = XLSX.write(originalWorkbook, { bookType: "xlsx", type: "array" });
+    console.log("Coloane cu hyperlink-uri găsite:", hyperlinkIndices);
+    
+    // Adăugăm hyperlink-urile pentru fiecare celulă relevantă
+    Object.entries(hyperlinkIndices).forEach(([, colIndex]) => {
+      for (let rowIndex = 1; rowIndex < originalExcelData.length; rowIndex++) { // skip header
+        const cellValue = originalExcelData[rowIndex][colIndex];
+        if (cellValue && typeof cellValue === 'string' && cellValue.trim()) {
+          const cellRef = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+          
+          // Căutăm URL-ul corespunzător în datele originale
+          const originalRow = originalExcelData[rowIndex];
+          if (originalRow && originalRow[colIndex]) {
+            const originalCell = originalRow[colIndex];
+            let hyperlinkUrl = '';
+            
+            // Încercăm să găsim URL-ul din datele originale
+            if (typeof originalCell === 'string' && originalCell.includes('http')) {
+              hyperlinkUrl = originalCell;
+            } else if (originalCell && typeof originalCell === 'object') {
+              // Dacă este un obiect cu hyperlink
+              if (originalCell.l && originalCell.l.Target) {
+                hyperlinkUrl = originalCell.l.Target;
+              } else if (originalCell.h && originalCell.h.link) {
+                hyperlinkUrl = originalCell.h.link;
+              }
+            }
+            
+            // Dacă am găsit un URL, adăugăm hyperlink-ul folosind funcția HYPERLINK
+            if (hyperlinkUrl) {
+              console.log(`Adăugat hyperlink pentru ${cellRef}: ${hyperlinkUrl}`);
+              ws[cellRef] = {
+                f: `HYPERLINK("${hyperlinkUrl}","${cellValue}")`,
+                v: cellValue
+              };
+            }
+          }
+        }
+      }
+    });
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "data");
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const blob = new Blob([wbout], { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -798,170 +812,43 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadCSVInRadius = () => {
-    const inR = billboards.filter((b) => b.inRadius);
-    if (!inR.length) {
-      alert("Nu există panouri în radius pentru a exporta!");
+
+
+
+
+  // Export panouri din radiusul locației căutate
+  const downloadBillboardsInLocationRadius = () => {
+    if (!centerPoint || centerMode !== "store") {
+      alert("Nu există o locație căutată cu radius pentru a exporta!");
       return;
     }
 
-    if (!originalExcelData.length) {
-      alert("Nu există date originale din Excel pentru export!");
+    const inRadius = billboards.filter((b) => b.inRadius);
+    if (!inRadius.length) {
+      alert("Nu există panouri în radiusul locației pentru a exporta!");
       return;
     }
 
-    // Folosim datele originale din Excel și adăugăm proximitățile
-    const exportData = originalExcelData.map(row => [...row]); // copie profundă
+    // Creează header-ul pentru Excel
+    const header = ["Denumire", "Adresa", "Latitudine", "Longitudine", "Distanța (m)", "În radius"];
     
-    // Găsim indexul coloanei "Proximitati"
-    const normalizeKey = (k: any) =>
-      String(k || "")
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/\s/g, "")
-        .replace(/[ăâ]/g, "a")
-        .replace(/ș/g, "s")
-        .replace(/ț/g, "t")
-        .replace(/î/g, "i");
+    // Creează rândurile cu datele panourilor
+    const rows: any[][] = [header];
     
-    const proximitatiIndex = originalExcelData[0]?.findIndex((header: string) => 
-      normalizeKey(header).includes("proximitati")
-    );
-    
-    if (proximitatiIndex === -1) {
-      alert("Nu s-a găsit coloana 'Proximitati' în Excel-ul original!");
-      return;
-    }
-
-    // Pentru fiecare panou în radius, găsim rândul corespunzător și adăugăm proximitățile
-    inR.forEach((billboard) => {
-      // Găsim rândul din Excel-ul original care corespunde acestui panou
-      const excelRowIndex = originalExcelData.findIndex((row, index) => {
-        if (index === 0) return false; // skip header
-        const lat = parseFloat(row[17]); // Latitudine
-        const lng = parseFloat(row[18]); // Longitudine
-        return Math.abs(lat - billboard.lat) < 0.0001 && Math.abs(lng - billboard.lng) < 0.0001;
-      });
-
-      if (excelRowIndex !== -1) {
-        // Calculează proximitățile pentru acest panou
-        const center = new googleNS!.maps.LatLng(billboard.lat, billboard.lng);
-        const prox: string[] = [];
-        poiMarkers.forEach((m) => {
-          const p = m.getPosition();
-          if (!p) return;
-          const d = googleNS!.maps.geometry.spherical.computeDistanceBetween(p, center);
-          if (d <= radius) {
-            const name = m.getTitle() || "Loc";
-            const address = (m as any).addr || "";
-            prox.push(`${name} - ${address}`);
-          }
-        });
-        const proxStr = prox.join(" ; ");
-        
-        // Actualizează coloana Proximitati în datele de export
-        exportData[excelRowIndex][proximitatiIndex] = proxStr;
-      }
+    inRadius.forEach((billboard) => {
+      const distance = billboard.distanceMeters ? Math.round(billboard.distanceMeters) : 0;
+      rows.push([
+        billboard.name || "Panou",
+        billboard.locationText || billboard.address || "N/A",
+        billboard.lat,
+        billboard.lng,
+        distance,
+        "Da"
+      ]);
     });
 
-    exportRowsToXLSXWithHyperlinks(exportData, "billboards_in_radius_with_proximities.xlsx");
-  };
-
-  const downloadPOIsInRadius = () => {
-    if (!googleNS || !centerPoint || centerMode !== "billboard") return;
-    const center = new googleNS.maps.LatLng(centerPoint.location);
-    const inside: Array<{ name: string; address: string; lat: number; lng: number; distance_m: number }> = [];
-    poiMarkers.forEach((m) => {
-      const p = m.getPosition();
-      if (!p) return;
-      const d = googleNS.maps.geometry.spherical.computeDistanceBetween(p, center);
-      if (d <= radius)
-        inside.push({
-          name: m.getTitle() || "Loc",
-          address: (m as any).addr || "",
-          lat: p.lat(),
-          lng: p.lng(),
-          distance_m: Math.round(d),
-        });
-    });
-    const header = ["name", "address", "lat", "lng", "distance_m"];
-    const rows: any[][] = [header, ...inside.map((r) => [r.name, r.address, r.lat, r.lng, r.distance_m])];
-    exportRowsToXLSX(rows, "poi_in_radius.xlsx");
-  };
-
-  // Export grupat: POI pentru toate panourile care au cercul activ
-  const downloadPOIsForSelectedBillboards = () => {
-    if (!googleNS || !poiMarkers.length) return;
-    const selected = Object.keys(billboardCircles);
-    if (!selected.length) {
-      alert("Nu există panouri cu cercuri active pentru a exporta!");
-      return;
-    }
-
-    if (!originalExcelData.length) {
-      alert("Nu există date originale din Excel pentru export!");
-      return;
-    }
-
-    // Folosim datele originale din Excel și adăugăm proximitățile
-    const exportData = originalExcelData.map(row => [...row]); // copie profundă
-    
-    // Găsim indexul coloanei "Proximitati"
-    const normalizeKey = (k: any) =>
-      String(k || "")
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/\s/g, "")
-        .replace(/[ăâ]/g, "a")
-        .replace(/ș/g, "s")
-        .replace(/ț/g, "t")
-        .replace(/î/g, "i");
-    
-    const proximitatiIndex = originalExcelData[0]?.findIndex((header: string) => 
-      normalizeKey(header).includes("proximitati")
-    );
-    
-    if (proximitatiIndex === -1) {
-      alert("Nu s-a găsit coloana 'Proximitati' în Excel-ul original!");
-      return;
-    }
-
-    // Pentru fiecare panou cu cerc activ, găsim rândul corespunzător și adăugăm proximitățile
-    selected.forEach((id) => {
-      const b = billboards.find((x) => x.id === id);
-      if (!b) return;
-
-      // Găsim rândul din Excel-ul original care corespunde acestui panou
-      const excelRowIndex = originalExcelData.findIndex((row, index) => {
-        if (index === 0) return false; // skip header
-        const lat = parseFloat(row[17]); // Latitudine
-        const lng = parseFloat(row[18]); // Longitudine
-        return Math.abs(lat - b.lat) < 0.0001 && Math.abs(lng - b.lng) < 0.0001;
-      });
-
-      if (excelRowIndex !== -1) {
-        // Calculează proximitățile pentru acest panou
-        const center = new googleNS.maps.LatLng(b.lat, b.lng);
-        const prox: string[] = [];
-        poiMarkers.forEach((m) => {
-          const p = m.getPosition();
-          if (!p) return;
-          const d = googleNS.maps.geometry.spherical.computeDistanceBetween(p, center);
-          if (d <= radius) {
-            const name = m.getTitle() || "Loc";
-            const address = (m as any).addr || "";
-            prox.push(`${name} - ${address}`);
-          }
-        });
-        const proxStr = prox.join(" ; ");
-        
-        // Actualizează coloana Proximitati în datele de export
-        exportData[excelRowIndex][proximitatiIndex] = proxStr;
-      }
-    });
-
-    // Export cu hyperlink-uri păstrate
-    exportRowsToXLSXWithHyperlinks(exportData, "billboards_with_proximities.xlsx");
+    // Export ca Excel
+    exportRowsToXLSX(rows, `panouri_in_radius_${centerPoint.name.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`);
   };
 
   // Export grupat în formatul vechi: BILLBOARD + POI-uri separate
@@ -995,8 +882,6 @@ export default function App() {
     });
     exportRowsToXLSX(rows, "poi_per_billboard_grouped.xlsx");
   };
-
-  // FILTRARE DISPONIBILITATI
   const filterBillboardsByAvailability = () => {
     if (!startDate || !endDate) {
       setFilteredBillboards([]);
@@ -1743,6 +1628,24 @@ return (
                       Ascunde radius la toate
                     </button>
                   </div>
+
+                  <button
+                    onClick={downloadBillboardsInLocationRadius}
+                    disabled={!billboards.length || !centerPoint || centerMode !== "store"}
+                    style={{
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      fontSize: 14,
+                      cursor: !billboards.length || !centerPoint || centerMode !== "store" ? "not-allowed" : "pointer",
+                      color: "#fff",
+                      background: "#059669",
+                      opacity: !billboards.length || !centerPoint || centerMode !== "store" ? 0.5 : 1,
+                      border: "none",
+                    }}
+                  >
+                    Exportă panourile din radiusul locației
+                  </button>
+
                   <button
                     onClick={() => downloadPOIsForSelectedBillboardsGrouped()}
                     disabled={!poiMarkers.length || !Object.keys(billboardCircles).length}
