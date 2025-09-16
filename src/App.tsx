@@ -42,7 +42,7 @@ export default function App() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem("gmaps_api_key") || "");
+  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem("gmaps_api_key") || "AIzaSyDsCaQhp8hDDwAd6HXQMF0DuW-RLWYXLkA");
   const [googleNS, setGoogleNS] = useState<typeof google | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
 
