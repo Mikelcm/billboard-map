@@ -794,6 +794,12 @@ export default function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  // Helper function to generate Google Street View URL
+  const generateStreetViewUrl = (lat: number, lng: number): string => {
+    return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
+  };
+
   const downloadTemplate = () => {
     const rows = [
       ["name", "lat", "lng", "address"],
@@ -830,20 +836,22 @@ export default function App() {
     }
 
     // Creează header-ul pentru Excel
-    const header = ["Denumire", "Adresa", "Latitudine", "Longitudine", "Distanța (m)", "În radius"];
+    const header = ["Denumire", "Adresa", "Latitudine", "Longitudine", "Distanța (m)", "În radius", "Street View"];
     
     // Creează rândurile cu datele panourilor
     const rows: any[][] = [header];
     
     inRadius.forEach((billboard) => {
       const distance = billboard.distanceMeters ? Math.round(billboard.distanceMeters) : 0;
+      const streetViewUrl = generateStreetViewUrl(billboard.lat, billboard.lng);
       rows.push([
         billboard.name || "Panou",
         billboard.locationText || billboard.address || "N/A",
         billboard.lat,
         billboard.lng,
         distance,
-        "Da"
+        "Da",
+        streetViewUrl
       ]);
     });
 
@@ -868,14 +876,15 @@ export default function App() {
       
       // header de grup
       rows.push(["BILLBOARD", b.name, b.lat, b.lng]);
-      rows.push(["name", "address", "lat", "lng", "distance_m"]);
+      rows.push(["name", "address", "lat", "lng", "distance_m", "streetview_link"]);
 
       poiMarkers.forEach((m) => {
         const p = m.getPosition();
         if (!p) return;
         const d = googleNS.maps.geometry.spherical.computeDistanceBetween(p, center);
         if (d <= radius) {
-          rows.push([m.getTitle() || "Loc", (m as any).addr || "", p.lat(), p.lng(), Math.round(d)]);
+          const streetViewUrl = generateStreetViewUrl(p.lat(), p.lng());
+          rows.push([m.getTitle() || "Loc", (m as any).addr || "", p.lat(), p.lng(), Math.round(d), streetViewUrl]);
         }
       });
       if (idx !== selected.length - 1) rows.push([""]); // separă grupurile cu o linie goală
